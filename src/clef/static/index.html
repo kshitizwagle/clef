@@ -8,11 +8,17 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>Clef</h1>
+    <div class="topbar__left">
+      <h1>Clef</h1>
+      <nav class="tabs" role="tablist">
+        <button type="button" class="tab" role="tab" data-view="ask" aria-selected="true">Ask</button>
+        <button type="button" class="tab" role="tab" data-view="evaluate" aria-selected="false">Evaluate CSV</button>
+      </nav>
+    </div>
     <span id="status" class="status status--unknown" title="Model server status">checking…</span>
   </header>
 
-  <main class="layout">
+  <main id="view-ask" class="layout" role="tabpanel">
     <section class="panel" aria-labelledby="input-heading">
       <h2 id="input-heading">Input</h2>
 
@@ -44,6 +50,106 @@
     </section>
   </main>
 
+  <main id="view-evaluate" class="stack" role="tabpanel" hidden>
+    <section class="panel">
+      <h2>Evaluate against a CSV</h2>
+      <p class="muted">
+        Each row is sent to Clef, and its prediction is compared with the row's correct answer.
+      </p>
+      <table class="format">
+        <thead><tr><th>Column</th><th>Contents</th></tr></thead>
+        <tbody>
+          <tr><td><code>context</code></td><td>The situation the model reasons about.</td></tr>
+          <tr><td><code>question</code></td><td>The question to answer.</td></tr>
+          <tr><td><code>answer</code></td><td>The correct answer.</td></tr>
+          <tr><td><code>options</code> <span class="muted">optional</span></td><td>Candidate answers separated by any punctuation, e.g. <code>TRUE;FALSE;NOT GIVEN</code> or <code>yes|no</code>. If empty or missing, the options are the distinct answers to the same question in the file.</td></tr>
+        </tbody>
+      </table>
+      <p class="muted">
+        Columns can be separated by commas, tabs, semicolons, pipes or any other punctuation. Put double
+        quotes around a field that contains the separator, and double any quotes inside it (<code>""</code>).
+      </p>
+
+      <div id="dropzone" class="dropzone">
+        <div class="dropzone__bar">
+          <input type="file" id="csv-file" accept=".csv,.tsv,text/csv,text/tab-separated-values" hidden>
+          <button type="button" id="choose-file" class="btn btn--small">Choose file</button>
+          <span id="file-name" class="muted">or drop a file, or paste below. Rows copied from a spreadsheet work too.</span>
+          <span class="dropzone__links">
+            <button type="button" id="load-sample" class="btn btn--ghost btn--small">Load sample</button>
+            <button type="button" id="clear-csv" class="btn btn--ghost btn--small">Clear</button>
+          </span>
+        </div>
+        <textarea id="csv-text" rows="10" spellcheck="false" aria-label="CSV text"
+          placeholder="context,question,answer,options&#10;Checkout has been failing for every customer.,Which team should handle this?,technical,billing|technical|shipping"></textarea>
+      </div>
+
+      <div class="actions">
+        <button type="button" id="run-eval" class="btn btn--primary" disabled>Run evaluation</button>
+        <button type="button" id="cancel-eval" class="btn" hidden>Cancel</button>
+        <span id="eval-error" class="error" role="alert"></span>
+      </div>
+
+      <div id="progress" class="progress" hidden>
+        <div class="progress__bar"><div id="progress-fill" class="progress__fill"></div></div>
+        <span id="progress-text" class="muted"></span>
+      </div>
+    </section>
+
+    <section id="eval-summary" class="panel" hidden>
+      <h2>Summary</h2>
+      <div class="tiles">
+        <div class="tile"><span class="tile__label">Accuracy</span><span class="tile__value" id="t-accuracy">–</span></div>
+        <div class="tile"><span class="tile__label">Correct</span><span class="tile__value" id="t-correct">–</span></div>
+        <div class="tile"><span class="tile__label">Mean confidence when right</span><span class="tile__value" id="t-conf-right">–</span></div>
+        <div class="tile"><span class="tile__label">Mean confidence when wrong</span><span class="tile__value" id="t-conf-wrong">–</span></div>
+        <div class="tile"><span class="tile__label">Errors</span><span class="tile__value" id="t-errors">–</span></div>
+      </div>
+      <div class="breakdowns">
+        <div>
+          <h3>Accuracy by confidence</h3>
+          <table class="data">
+            <thead><tr><th>Confidence</th><th class="num">Rows</th><th class="num">Accuracy</th></tr></thead>
+            <tbody id="bands"></tbody>
+          </table>
+        </div>
+        <div>
+          <h3>Accuracy by question <span class="muted">worst first</span></h3>
+          <table class="data">
+            <thead><tr><th>Question</th><th class="num">Rows</th><th class="num">Accuracy</th></tr></thead>
+            <tbody id="per-question"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="eval-rows" class="panel" hidden>
+      <div class="results-header">
+        <h2>Rows <span class="muted">ranked by confidence</span></h2>
+        <div class="row-tools">
+          <div class="filters" role="group" aria-label="Filter rows">
+            <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+            <button type="button" class="chip" data-filter="wrong" aria-pressed="false">Wrong</button>
+            <button type="button" class="chip" data-filter="error" aria-pressed="false">Errors</button>
+          </div>
+          <button type="button" id="download-results" class="btn btn--small">Download results CSV</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="data rows">
+          <thead>
+            <tr>
+              <th class="num">Row</th><th>Question</th><th>Context</th><th>Answer</th>
+              <th>Prediction</th><th class="num">Confidence</th><th class="num">P(answer)</th><th>Result</th>
+            </tr>
+          </thead>
+          <tbody id="row-body"></tbody>
+        </table>
+      </div>
+      <p id="rows-empty" class="muted" hidden>No rows match this filter.</p>
+    </section>
+  </main>
+
   <template id="question-tpl">
     <div class="question">
       <div class="question__head">
@@ -63,5 +169,6 @@
   </template>
 
   <script src="/static/app.js"></script>
+  <script src="/static/evaluate.js"></script>
 </body>
 </html>

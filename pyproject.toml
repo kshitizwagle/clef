@@ -1,13 +1,15 @@
 [project]
 name = "clef"
 version = "0.1.0"
-description = "Add your description here"
+description = "Web UI and API for the Clef-Flash decision model on llama.cpp, with CSV evaluation"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.142.2",
     "httpx>=0.28.1",
-    "torch>=2.14.1",
+    "pandas>=3.0.6",
     "uvicorn[standard]>=0.54.0",
 ]
 

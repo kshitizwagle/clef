@@ -1,0 +1,10 @@
+context,question,answer,options
+Checkout has been failing for every customer for the last hour.,Which team should handle this?,technical,billing|technical|shipping
+I was charged twice for my order last week and nobody has replied.,Which team should handle this?,billing,billing|technical|shipping
+My parcel says delivered but it is not at my door.,Which team should handle this?,shipping,billing|technical|shipping
+The app crashes every time I open the settings page.,Which team should handle this?,technical,billing|technical|shipping
+Can I get a refund for the subscription I forgot to cancel?,Which team should handle this?,billing,billing|technical|shipping
+Checkout has been failing for every customer for the last hour.,Is a service down?,yes,
+The app crashes every time I open the settings page.,Is a service down?,no,
+I was charged twice for my order last week and nobody has replied.,Is the customer angry?,yes,
+Thanks for the quick help yesterday!,Is the customer angry?,no,

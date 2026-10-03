@@ -39,8 +39,14 @@ class LlamaServer:
         self.log_path = Path(os.environ.get("CLEF_SERVER_LOG", DEFAULT_LOG)).expanduser()
         # The first start downloads ~10 GB, so allow plenty of time.
         self.ready_timeout = float(os.environ.get("CLEF_READY_TIMEOUT", "1800"))
+        # Under WSL the ROCm runtime sometimes segfaults while creating the GPU
+        # context ("[CreateContext] fail 11"); a fresh start usually works.
+        self.start_attempts = int(os.environ.get("CLEF_START_ATTEMPTS", "3"))
         self.proc: asyncio.subprocess.Process | None = None
         self._pump: asyncio.Task | None = None
+        self._watch: asyncio.Task | None = None
+        self._log = None
+        self._stopping = False
         self._tail: collections.deque[bytes] = collections.deque(maxlen=40)
 
     @property
@@ -71,6 +77,30 @@ class LlamaServer:
 
         log.info("starting: %s", shlex.join(self.command))
         log.info("llama-server log: %s", self.log_path)
+        self._log = self.log_path.open("wb")
+
+        for attempt in range(1, self.start_attempts + 1):
+            code = await self._start_once(client)
+            if code is None:
+                self._watch = asyncio.create_task(self._watch_exit())
+                return
+            failure = (
+                f"llama-server exited with code {code} before it was ready. "
+                f"Last output:\n{self._tail_text()}"
+            )
+            # A negative code means it was killed by a signal (a crash). A
+            # normal error exit, such as a bad flag, will not fix itself.
+            if code >= 0 or attempt == self.start_attempts:
+                raise RuntimeError(failure)
+            log.warning(
+                "llama-server crashed during startup (attempt %d/%d), retrying:\n%s",
+                attempt, self.start_attempts, self._tail_text(),
+            )
+            await asyncio.sleep(2)
+
+    async def _start_once(self, client: httpx.AsyncClient) -> int | None:
+        """Returns None once the server is ready, or its exit code if it died first."""
+        self._tail.clear()
         self.proc = await asyncio.create_subprocess_exec(
             *self.command,
             stdin=asyncio.subprocess.DEVNULL,
@@ -84,19 +114,17 @@ class LlamaServer:
         while True:
             if not self.running:
                 await self._pump
-                raise RuntimeError(
-                    f"llama-server exited with code {self.proc.returncode} before it was ready. "
-                    f"Last output:\n{self._tail_text()}"
-                )
+                return self.proc.returncode
             if await self._healthy(client):
                 log.info("llama-server is ready (pid %s)", self.proc.pid)
-                return
+                return None
             if time.monotonic() > deadline:
                 await self.stop()
                 raise RuntimeError(f"llama-server was not ready after {self.ready_timeout:.0f}s")
             await asyncio.sleep(1)
 
     async def stop(self) -> None:
+        self._stopping = True
         if self.running:
             log.info("stopping llama-server (pid %s)", self.proc.pid)
             self.proc.terminate()
@@ -108,6 +136,23 @@ class LlamaServer:
                 await self.proc.wait()
         if self._pump is not None:
             await self._pump
+        if self._watch is not None:
+            await self._watch
+        if self._log is not None:
+            self._log.close()
+
+    async def _watch_exit(self) -> None:
+        # If llama-server dies while the app is serving, every request would
+        # fail, so shut the app down instead of running without a model.
+        code = await self.proc.wait()
+        if self._stopping:
+            return
+        await self._pump
+        log.error(
+            "llama-server exited unexpectedly with code %s, shutting down. Last output:\n%s",
+            code, self._tail_text(),
+        )
+        os.kill(os.getpid(), signal.SIGTERM)
 
     async def _healthy(self, client: httpx.AsyncClient) -> bool:
         # llama-server answers 503 while the model is still loading.
@@ -119,13 +164,12 @@ class LlamaServer:
     async def _pump_output(self) -> None:
         # Raw chunks rather than lines, so the \r download progress bar still
         # renders in the terminal.
-        with self.log_path.open("wb") as f:
-            while chunk := await self.proc.stdout.read(4096):
-                sys.stderr.buffer.write(chunk)
-                sys.stderr.buffer.flush()
-                f.write(chunk)
-                f.flush()
-                self._tail.append(chunk)
+        while chunk := await self.proc.stdout.read(4096):
+            sys.stderr.buffer.write(chunk)
+            sys.stderr.buffer.flush()
+            self._log.write(chunk)
+            self._log.flush()
+            self._tail.append(chunk)
 
     def _tail_text(self) -> str:
         text = b"".join(self._tail).decode(errors="replace").replace("\r", "\n")

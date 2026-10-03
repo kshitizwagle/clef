@@ -13,11 +13,14 @@ function addAnswer(question, text = "", focus = false) {
   const node = answerTpl.content.firstElementChild.cloneNode(true);
   const input = node.querySelector(".answer__text");
   input.value = text;
-  // Enter in an answer adds the next one, so lists can be typed quickly.
+  // Enter moves to the next answer, adding one at the end, so lists can be
+  // typed quickly.
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
-      addAnswer(question, "", true);
+      const next = node.nextElementSibling;
+      if (next) next.querySelector(".answer__text").focus();
+      else addAnswer(question, "", true);
     }
   });
   node.querySelector(".answer__remove").addEventListener("click", () => node.remove());
@@ -170,3 +173,19 @@ addQuestion("Is a service down?", ["yes", "no"]);
 
 checkStatus();
 setInterval(checkStatus, 10000);
+
+// Tabs. The selected tab is kept in the URL hash, so a reload stays on it.
+function showView(name) {
+  document.querySelectorAll(".tab").forEach((t) => {
+    const selected = t.dataset.view === name;
+    t.setAttribute("aria-selected", String(selected));
+    document.getElementById("view-" + t.dataset.view).hidden = !selected;
+  });
+}
+document.querySelectorAll(".tab").forEach((t) =>
+  t.addEventListener("click", () => {
+    showView(t.dataset.view);
+    history.replaceState(null, "", "#" + t.dataset.view);
+  })
+);
+showView(location.hash === "#evaluate" ? "evaluate" : "ask");

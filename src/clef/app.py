@@ -4,19 +4,25 @@ Each question has a list of candidate answers. They are sent to the
 upstream /v1/systemone endpoint as `choice` questions, and the response is
 returned with each question's answers ranked by probability and the questions
 ranked by confidence.
+
+/api/evaluate scores the model against a CSV of labelled examples, see
+clef.evaluate for the format.
 """
 
+import asyncio
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
+from clef.evaluate import CsvError, EvalRow, parse_csv, summarize
 from clef.llama import LlamaServer
 
 UPSTREAM_URL = os.environ.get("CLEF_UPSTREAM", "http://127.0.0.1:8080")
@@ -24,6 +30,9 @@ UPSTREAM_TIMEOUT = float(os.environ.get("CLEF_UPSTREAM_TIMEOUT", "120"))
 STATIC_DIR = Path(__file__).parent / "static"
 # Set CLEF_MANAGE_SERVER=0 to use a llama-server started some other way.
 MANAGE_SERVER = os.environ.get("CLEF_MANAGE_SERVER", "1") != "0"
+# Requests in flight during an evaluation; llama-server runs 4 slots by default.
+EVAL_CONCURRENCY = int(os.environ.get("CLEF_EVAL_CONCURRENCY", "4"))
+MAX_CSV_BYTES = 20 * 1024 * 1024
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -165,6 +174,82 @@ def create_app(
         if r.status_code != 200:
             raise HTTPException(502, f"model server returned {r.status_code}: {r.text}")
         return rank_results(req, r.json())
+
+    async def evaluate_row(index: int, row: EvalRow) -> dict:
+        result = {
+            "index": index,
+            "row_number": row.row_number,
+            "context": row.context,
+            "question": row.question,
+            "options": row.options,
+            "answer": row.answer,
+            "prediction": None,
+            "confidence": None,
+            "answer_probability": None,
+            "correct": None,
+            "error": None,
+        }
+        payload = {
+            "state": row.context,
+            "questions": {
+                "q0": {
+                    "type": "choice",
+                    "instructions": row.question,
+                    "criteria": {o: None for o in row.options},
+                }
+            },
+        }
+        try:
+            r = await client.post("/v1/systemone", json=payload)
+            if r.status_code != 200:
+                result["error"] = f"model server returned {r.status_code}: {r.text[:300]}"
+                return result
+            a = r.json()["answers"]["q0"]
+        except (httpx.HTTPError, KeyError, ValueError) as e:
+            result["error"] = f"request failed: {e}"
+            return result
+        result["prediction"] = a["choice"]
+        result["confidence"] = a["confidence"]
+        result["answer_probability"] = a.get("probabilities", {}).get(row.answer)
+        result["correct"] = a["choice"] == row.answer
+        return result
+
+    @app.post("/api/evaluate")
+    async def evaluate(request: Request) -> StreamingResponse:
+        """Takes a CSV body and streams NDJSON: a `start` line, one `row` line
+        per row as it finishes, then a `summary` line."""
+        body = await request.body()
+        if len(body) > MAX_CSV_BYTES:
+            raise HTTPException(413, f"the file is larger than {MAX_CSV_BYTES // 2**20} MB")
+        try:
+            rows = parse_csv(body.decode("utf-8"))
+        except UnicodeDecodeError:
+            raise HTTPException(400, "the file is not UTF-8 text")
+        except CsvError as e:
+            raise HTTPException(400, str(e))
+
+        async def stream():
+            yield json.dumps({"type": "start", "total": len(rows)}) + "\n"
+            limit = asyncio.Semaphore(EVAL_CONCURRENCY)
+
+            async def run(i: int, row: EvalRow) -> dict:
+                async with limit:
+                    return await evaluate_row(i, row)
+
+            tasks = [asyncio.create_task(run(i, row)) for i, row in enumerate(rows)]
+            results = []
+            try:
+                for done in asyncio.as_completed(tasks):
+                    result = await done
+                    results.append(result)
+                    yield json.dumps({"type": "row", **result}) + "\n"
+            finally:
+                # Stops the remaining requests if the browser goes away.
+                for t in tasks:
+                    t.cancel()
+            yield json.dumps({"type": "summary", **summarize(results)}) + "\n"
+
+        return StreamingResponse(stream(), media_type="application/x-ndjson")
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
