@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clef</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Clef</h1>
+    <span id="status" class="status status--unknown" title="Model server status">checking…</span>
+  </header>
+
+  <main class="layout">
+    <section class="panel" aria-labelledby="input-heading">
+      <h2 id="input-heading">Input</h2>
+
+      <label class="field">
+        <span class="field__label">State</span>
+        <span class="field__hint">The situation the model reasons about.</span>
+        <textarea id="state" rows="4" placeholder="e.g. Checkout has been failing for every customer for the last hour."></textarea>
+      </label>
+
+      <div class="questions-header">
+        <h3>Questions</h3>
+        <button type="button" id="add-question" class="btn btn--ghost">+ Add question</button>
+      </div>
+      <div id="questions"></div>
+
+      <div class="actions">
+        <button type="button" id="predict" class="btn btn--primary">Predict</button>
+        <span id="form-error" class="error" role="alert"></span>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="results-heading">
+      <div class="results-header">
+        <h2 id="results-heading">Results</h2>
+        <span id="results-meta" class="muted"></span>
+      </div>
+      <p class="muted" id="results-empty">Results appear here, ranked by confidence.</p>
+      <ol id="results" class="results"></ol>
+    </section>
+  </main>
+
+  <template id="question-tpl">
+    <div class="question">
+      <div class="question__head">
+        <input class="question__text" type="text" placeholder="Question, e.g. Which team should handle this?">
+        <button type="button" class="btn btn--icon question__remove" aria-label="Remove question">×</button>
+      </div>
+      <ul class="answers"></ul>
+      <button type="button" class="btn btn--ghost btn--small add-answer">+ Add answer</button>
+    </div>
+  </template>
+
+  <template id="answer-tpl">
+    <li class="answer">
+      <input class="answer__text" type="text" placeholder="Answer">
+      <button type="button" class="btn btn--icon answer__remove" aria-label="Remove answer">×</button>
+    </li>
+  </template>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
