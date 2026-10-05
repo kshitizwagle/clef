@@ -188,9 +188,9 @@ If a model server is already answering at `CLEF_UPSTREAM`, the app uses it inste
 | `CLEF_READY_TIMEOUT` | `1800` | Seconds to wait for the model to load (first run downloads ~10 GB) |
 | `CLEF_EVAL_CONCURRENCY` | `4` | Rows evaluated at once (llama-server runs 4 slots by default) |
 | `CLEF_UPSTREAM_TIMEOUT` | `120` | Seconds to wait for a prediction |
-| `CLEF_HOST` / `CLEF_PORT` | `127.0.0.1` / `8000` | Where the web app listens |
+| `CLEF_HOST` / `CLEF_PORT` | `0.0.0.0` / `8000` | Where the web app listens |
 
-The app has no authentication. Keep `CLEF_HOST` on `127.0.0.1` unless the network is trusted.
+The app has no authentication. It listens on all interfaces by default; set `CLEF_HOST=127.0.0.1` to keep it local-only unless the network is trusted.
 
 ## Input size limit
 
